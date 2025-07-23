@@ -48,6 +48,7 @@
             border-radius: 8px;
             text-align: center;
             margin: 10px;
+            color: #2c3e50;
         }
 
         .controls {
@@ -63,6 +64,7 @@
             cursor: pointer;
             color: white;
             min-width: 120px;
+            transition: all 0.3s ease;
         }
 
         .btn-forward { background-color: #3498db; }
@@ -78,6 +80,10 @@
         button:hover {
             opacity: 0.8;
             transform: translateY(-2px);
+        }
+
+        button:active {
+            transform: translateY(0px);
         }
 
         .test-buttons {
@@ -97,6 +103,7 @@
             margin-top: 20px;
             border: 2px solid #34495e;
             min-height: 50px;
+            word-wrap: break-word;
         }
 
         .status-success { border-color: #27ae60; background-color: #27ae60; }
@@ -107,6 +114,54 @@
             margin-top: 15px;
             font-size: 14px;
             opacity: 0.8;
+        }
+
+        .api-selector {
+            margin-bottom: 20px;
+            background-color: #2c3e50;
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        select {
+            padding: 10px;
+            font-size: 16px;
+            border: none;
+            border-radius: 5px;
+            background-color: white;
+            color: #2c3e50;
+            margin: 5px;
+        }
+
+        .connection-status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-left: 10px;
+        }
+
+        .connection-online { background-color: #27ae60; }
+        .connection-offline { background-color: #e74c3c; }
+        .connection-testing { background-color: #f39c12; }
+
+        @media (max-width: 600px) {
+            .container {
+                margin: 10px;
+                padding: 20px;
+            }
+            
+            button {
+                padding: 12px 20px;
+                font-size: 16px;
+                margin: 5px;
+                min-width: 100px;
+            }
+            
+            input {
+                width: 180px;
+                padding: 12px;
+            }
         }
     </style>
 </head>
@@ -119,6 +174,16 @@
             1. Install WallE app on Android<br>
             2. Enter the Device ID shown in app<br>
             3. Control your robot remotely!
+        </div>
+
+        <div class="api-selector">
+            <label for="apiSelect">API Service:</label>
+            <select id="apiSelect">
+                <option value="https://api.jsonbin.io/v3/b/66f7d8e2acd3cb34a888a1c7">JSONBin.io (Primary)</option>
+                <option value="https://api.npoint.io/ed7bced7540b47423755">NPoint.io (Backup)</option>
+                <option value="https://httpbin.org/json">Test Service</option>
+            </select>
+            <span class="connection-status connection-offline" id="connectionStatus"></span>
         </div>
 
         <div class="device-input">
@@ -141,9 +206,10 @@
         </div>
 
         <div class="test-buttons">
-            <button class="test-btn" onclick="testAPI()">Test API</button>
+            <button class="test-btn" onclick="testAPI()">Test Connection</button>
             <button class="test-btn" onclick="viewJSON()">View Data</button>
             <button class="test-btn" onclick="clearCommands()">Clear All</button>
+            <button class="test-btn" onclick="resetApp()">Reset App</button>
         </div>
 
         <div id="status">
@@ -156,8 +222,17 @@
     </div>
 
     <script>
-        const API_URL = 'https://api.npoint.io/ed7bced7540b47423755';
-        
+        let currentAPI = 'https://api.jsonbin.io/v3/b/66f7d8e2acd3cb34a888a1c7';
+        let isConnected = false;
+        let lastCommandTime = 0;
+        const COMMAND_COOLDOWN = 200; // 200ms between commands
+
+        function updateConnectionStatus(status) {
+            const statusEl = document.getElementById('connectionStatus');
+            statusEl.className = `connection-status connection-${status}`;
+            isConnected = (status === 'online');
+        }
+
         function updateStatus(message, type = 'normal') {
             const statusEl = document.getElementById('status');
             statusEl.textContent = message;
@@ -172,7 +247,17 @@
             }
         }
 
-        function sendCommand(cmd) {
+        function getCurrentAPI() {
+            return document.getElementById('apiSelect').value;
+        }
+
+        async function sendCommand(cmd) {
+            const now = Date.now();
+            if (now - lastCommandTime < COMMAND_COOLDOWN) {
+                return; // Prevent spam clicking
+            }
+            lastCommandTime = now;
+
             const deviceId = document.getElementById('deviceId').value.trim().toUpperCase();
             
             if (!deviceId) {
@@ -184,96 +269,219 @@
                 updateStatus('Device ID must be 8 characters!', 'error');
                 return;
             }
+
+            if (!isConnected) {
+                updateStatus('Not connected to API. Testing connection...', 'error');
+                await testAPI();
+                if (!isConnected) return;
+            }
             
             updateStatus(`Sending "${cmd}" to ${deviceId}...`, 'sending');
             
-            fetch(API_URL)
-                .then(response => response.json())
-                .then(currentData => {
-                    currentData[deviceId] = {
-                        command: cmd,
-                        timestamp: Math.floor(Date.now() / 1000)
-                    };
-                    
-                    return fetch(API_URL, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(currentData)
+            try {
+                const apiUrl = getCurrentAPI();
+                let currentData = {};
+                
+                // Try to fetch current data, but don't fail if it doesn't exist
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Master-Key': '$2a$10$1234567890abcdef1234567890abcdef12345678'
+                        }
                     });
-                })
-                .then(response => {
+                    
                     if (response.ok) {
-                        updateStatus(`✅ Command "${cmd}" sent to ${deviceId}!`, 'success');
-                    } else {
-                        updateStatus('❌ Failed to send command', 'error');
+                        const result = await response.json();
+                        // Handle different API response formats
+                        currentData = result.record || result || {};
                     }
-                })
-                .catch(error => {
-                    updateStatus('❌ Network error', 'error');
-                    console.error('Error:', error);
+                } catch (fetchError) {
+                    console.log('Could not fetch existing data, starting fresh');
+                }
+                
+                // Add/update the command for this device
+                currentData[deviceId] = {
+                    command: cmd,
+                    timestamp: Math.floor(Date.now() / 1000),
+                    sent_at: new Date().toISOString()
+                };
+                
+                // Send the updated data
+                const putResponse = await fetch(apiUrl, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Master-Key': '$2a$10$1234567890abcdef1234567890abcdef12345678'
+                    },
+                    body: JSON.stringify(currentData)
                 });
+                
+                if (putResponse.ok) {
+                    updateStatus(`✅ Command "${cmd}" sent to ${deviceId}!`, 'success');
+                    updateConnectionStatus('online');
+                } else {
+                    throw new Error(`HTTP ${putResponse.status}`);
+                }
+                
+            } catch (error) {
+                updateStatus(`❌ Failed to send: ${error.message}`, 'error');
+                updateConnectionStatus('offline');
+                console.error('Send command error:', error);
+            }
         }
 
-        function testAPI() {
-            updateStatus('Testing API...', 'sending');
+        async function testAPI() {
+            updateStatus('Testing connection...', 'sending');
+            updateConnectionStatus('testing');
             
-            fetch(API_URL)
-                .then(response => response.json())
-                .then(data => {
-                    const count = Object.keys(data).length;
-                    updateStatus(`✅ API works! ${count} devices found.`, 'success');
-                })
-                .catch(error => {
-                    updateStatus('❌ API test failed', 'error');
+            try {
+                const apiUrl = getCurrentAPI();
+                const response = await fetch(apiUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Master-Key': '$2a$10$1234567890abcdef1234567890abcdef12345678'
+                    }
                 });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const record = data.record || data || {};
+                    const count = Object.keys(record).length;
+                    
+                    updateStatus(`✅ Connected! ${count} devices found.`, 'success');
+                    updateConnectionStatus('online');
+                    return true;
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+            } catch (error) {
+                updateStatus(`❌ Connection failed: ${error.message}`, 'error');
+                updateConnectionStatus('offline');
+                return false;
+            }
         }
 
         function viewJSON() {
-            window.open(API_URL, '_blank');
+            window.open(getCurrentAPI(), '_blank');
         }
 
-        function clearCommands() {
-            if (confirm('Clear all commands?')) {
-                fetch(API_URL, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                })
-                .then(() => updateStatus('✅ All commands cleared!', 'success'))
-                .catch(() => updateStatus('❌ Failed to clear', 'error'));
+        async function clearCommands() {
+            if (confirm('Clear all commands for all devices?')) {
+                try {
+                    const apiUrl = getCurrentAPI();
+                    const response = await fetch(apiUrl, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Master-Key': '$2a$10$1234567890abcdef1234567890abcdef12345678'
+                        },
+                        body: JSON.stringify({})
+                    });
+                    
+                    if (response.ok) {
+                        updateStatus('✅ All commands cleared!', 'success');
+                    } else {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    updateStatus(`❌ Failed to clear: ${error.message}`, 'error');
+                }
             }
         }
 
-        // Save/load device ID
+        function resetApp() {
+            if (confirm('Reset app? This will clear your Device ID and test the connection.')) {
+                localStorage.removeItem('walleDeviceId');
+                localStorage.removeItem('walleSelectedAPI');
+                document.getElementById('deviceId').value = '';
+                document.getElementById('apiSelect').selectedIndex = 0;
+                updateConnectionStatus('offline');
+                updateStatus('App reset! Enter Device ID to continue.', 'normal');
+                setTimeout(testAPI, 500);
+            }
+        }
+
+        // Save/load device ID and API selection
         document.getElementById('deviceId').addEventListener('input', function() {
-            localStorage.setItem('walleDeviceId', this.value.toUpperCase());
+            const value = this.value.toUpperCase();
+            this.value = value;
+            localStorage.setItem('walleDeviceId', value);
         });
 
-        window.addEventListener('load', function() {
-            const saved = localStorage.getItem('walleDeviceId');
-            if (saved) {
-                document.getElementById('deviceId').value = saved;
-            }
+        document.getElementById('apiSelect').addEventListener('change', function() {
+            localStorage.setItem('walleSelectedAPI', this.value);
+            updateConnectionStatus('offline');
+            updateStatus('API changed. Testing new connection...', 'normal');
             setTimeout(testAPI, 500);
         });
 
-        // Keyboard controls
-        document.addEventListener('keydown', function(event) {
-            if (event.target.tagName === 'INPUT') return;
+        // Load saved data on page load
+        window.addEventListener('load', function() {
+            const savedDeviceId = localStorage.getItem('walleDeviceId');
+            const savedAPI = localStorage.getItem('walleSelectedAPI');
             
+            if (savedDeviceId) {
+                document.getElementById('deviceId').value = savedDeviceId;
+            }
+            
+            if (savedAPI) {
+                document.getElementById('apiSelect').value = savedAPI;
+            }
+            
+            // Test connection after a short delay
+            setTimeout(testAPI, 1000);
+        });
+
+        // Keyboard controls with improved handling
+        document.addEventListener('keydown', function(event) {
+            if (event.target.tagName === 'INPUT' || event.target.tagName === 'SELECT') return;
+            
+            let command = null;
             switch(event.key.toLowerCase()) {
                 case 'arrowup':
-                case 'w': sendCommand('F'); break;
+                case 'w': command = 'F'; break;
                 case 'arrowdown':
-                case 's': sendCommand('B'); break;
+                case 's': command = 'B'; break;
                 case 'arrowleft':
-                case 'a': sendCommand('L'); break;
+                case 'a': command = 'L'; break;
                 case 'arrowright':
-                case 'd': sendCommand('R'); break;
+                case 'd': command = 'R'; break;
                 case ' ':
-                case 'x': sendCommand('S'); break;
+                case 'x': command = 'S'; break;
             }
-            event.preventDefault();
+            
+            if (command) {
+                event.preventDefault();
+                sendCommand(command);
+            }
+        });
+
+        // Prevent zoom on double tap for mobile
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', function(event) {
+            const now = (new Date()).getTime();
+            if (now - lastTouchEnd <= 300) {
+                event.preventDefault();
+            }
+            lastTouchEnd = now;
+        }, false);
+
+        // Add visual feedback for button presses
+        document.addEventListener('DOMContentLoaded', function() {
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(button => {
+                button.addEventListener('touchstart', function() {
+                    this.style.transform = 'translateY(2px)';
+                });
+                
+                button.addEventListener('touchend', function() {
+                    this.style.transform = 'translateY(-2px)';
+                });
+            });
         });
     </script>
 </body>
