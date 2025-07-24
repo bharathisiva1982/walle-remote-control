@@ -1,280 +1,62 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WallE Remote Control</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #2c3e50;
-            color: white;
-            text-align: center;
-        }
-
-        .container {
-            max-width: 500px;
-            margin: 0 auto;
-            background-color: #34495e;
-            padding: 30px;
-            border-radius: 15px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-        }
-
-        h1 {
-            color: #ecf0f1;
-            margin-bottom: 20px;
-        }
-
-        .info-box {
-            background-color: #3498db;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            color: white;
-        }
-
-        .device-input {
-            margin-bottom: 30px;
-        }
-
-        input {
-            width: 200px;
-            padding: 15px;
-            font-size: 18px;
-            border: none;
-            border-radius: 8px;
-            text-align: center;
-            margin: 10px;
-        }
-
-        .controls {
-            margin: 20px 0;
-        }
-
-        button {
-            padding: 15px 25px;
-            margin: 8px;
-            font-size: 18px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            color: white;
-            min-width: 120px;
-        }
-
-        .btn-forward { background-color: #3498db; }
-        .btn-backward { background-color: #9b59b6; }
-        .btn-left { background-color: #f39c12; }
-        .btn-right { background-color: #e67e22; }
-        .btn-stop { 
-            background-color: #e74c3c; 
-            font-size: 20px;
-            padding: 18px 30px;
-        }
-
-        button:hover {
-            opacity: 0.8;
-            transform: translateY(-2px);
-        }
-
-        .test-buttons {
-            margin: 20px 0;
-        }
-
-        .test-btn {
-            background-color: #8e44ad;
-            font-size: 14px;
-            padding: 10px 15px;
-        }
-
-        #status {
-            background-color: #2c3e50;
-            padding: 20px;
-            border-radius: 10px;
-            margin-top: 20px;
-            border: 2px solid #34495e;
-            min-height: 50px;
-        }
-
-        .status-success { border-color: #27ae60; background-color: #27ae60; }
-        .status-error { border-color: #e74c3c; background-color: #e74c3c; }
-        .status-sending { border-color: #f39c12; background-color: #f39c12; }
-
-        .keyboard-hint {
-            margin-top: 15px;
-            font-size: 14px;
-            opacity: 0.8;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <title>WallE Remote Control</title>
+  <script src="https://www.gstatic.com/firebasejs/10.4.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.4.0/firebase-database-compat.js"></script>
+  <style>
+    body { background-color: #2c3e50; color: white; text-align: center; font-family: sans-serif; }
+    .container { max-width: 500px; margin: 40px auto; padding: 20px; background-color: #34495e; border-radius: 10px; }
+    input { padding: 10px; font-size: 18px; width: 200px; margin-bottom: 20px; border-radius: 5px; border: none; }
+    button { padding: 15px 25px; margin: 8px; font-size: 18px; border: none; border-radius: 8px; cursor: pointer; }
+    .status-success { background-color: #27ae60; }
+    .status-error { background-color: #e74c3c; }
+    .status-sending { background-color: #f39c12; }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🤖 WallE Remote Control</h1>
-        
-        <div class="info-box">
-            <strong>How to Use:</strong><br>
-            1. Install WallE app on Android<br>
-            2. Enter the Device ID shown in app<br>
-            3. Control your robot remotely!
-        </div>
+  <div class="container">
+    <h1>🤖 WallE Remote</h1>
+    <input type="text" id="deviceId" placeholder="Enter Device ID" maxlength="8" />
+    <br />
+    <button onclick="sendCommand('F')">⬆️ Forward</button><br />
+    <button onclick="sendCommand('L')">⬅️ Left</button>
+    <button onclick="sendCommand('S')">⏹️ STOP</button>
+    <button onclick="sendCommand('R')">➡️ Right</button><br />
+    <button onclick="sendCommand('B')">⬇️ Backward</button>
+    <div id="status">Enter device ID to begin</div>
+  </div>
 
-        <div class="device-input">
-            <h3>Device ID:</h3>
-            <input type="text" id="deviceId" placeholder="Enter 8-char ID" maxlength="8">
-        </div>
+  <script>
+    const firebaseConfig = {
+      databaseURL: "https://walle-remote-default-rtdb.firebaseio.com/"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
 
-        <div class="controls">
-            <div>
-                <button class="btn-forward" onclick="sendCommand('F')">⬆️ Forward</button>
-            </div>
-            <div>
-                <button class="btn-left" onclick="sendCommand('L')">⬅️ Left</button>
-                <button class="btn-stop" onclick="sendCommand('S')">⏹️ STOP</button>
-                <button class="btn-right" onclick="sendCommand('R')">➡️ Right</button>
-            </div>
-            <div>
-                <button class="btn-backward" onclick="sendCommand('B')">⬇️ Backward</button>
-            </div>
-        </div>
+    function updateStatus(message, type) {
+      const status = document.getElementById("status");
+      status.textContent = message;
+      status.className = type ? "status-" + type : "";
+    }
 
-        <div class="test-buttons">
-            <button class="test-btn" onclick="testAPI()">Test API</button>
-            <button class="test-btn" onclick="viewJSON()">View Data</button>
-            <button class="test-btn" onclick="clearCommands()">Clear All</button>
-        </div>
-
-        <div id="status">
-            Enter Device ID and start controlling! 🚀
-        </div>
-
-        <div class="keyboard-hint">
-            💡 Use Arrow keys, WASD, or Spacebar (stop)
-        </div>
-    </div>
-
-    <script>
-        const API_URL = 'https://api.npoint.io/ed7bced7540b47423755';
-        
-        function updateStatus(message, type = 'normal') {
-            const statusEl = document.getElementById('status');
-            statusEl.textContent = message;
-            
-            statusEl.className = '';
-            if (type === 'success') {
-                statusEl.className = 'status-success';
-            } else if (type === 'error') {
-                statusEl.className = 'status-error';
-            } else if (type === 'sending') {
-                statusEl.className = 'status-sending';
-            }
-        }
-
-        function sendCommand(cmd) {
-            const deviceId = document.getElementById('deviceId').value.trim().toUpperCase();
-            
-            if (!deviceId) {
-                updateStatus('Please enter Device ID first!', 'error');
-                return;
-            }
-            
-            if (deviceId.length !== 8) {
-                updateStatus('Device ID must be 8 characters!', 'error');
-                return;
-            }
-            
-            updateStatus(`Sending "${cmd}" to ${deviceId}...`, 'sending');
-            
-            fetch(API_URL)
-                .then(response => response.json())
-                .then(currentData => {
-                    currentData[deviceId] = {
-                        command: cmd,
-                        timestamp: Math.floor(Date.now() / 1000)
-                    };
-                    
-                    return fetch(API_URL, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(currentData)
-                    });
-                })
-                .then(response => {
-                    if (response.ok) {
-                        updateStatus(`✅ Command "${cmd}" sent to ${deviceId}!`, 'success');
-                    } else {
-                        updateStatus('❌ Failed to send command', 'error');
-                    }
-                })
-                .catch(error => {
-                    updateStatus('❌ Network error', 'error');
-                    console.error('Error:', error);
-                });
-        }
-
-        function testAPI() {
-            updateStatus('Testing API...', 'sending');
-            
-            fetch(API_URL)
-                .then(response => response.json())
-                .then(data => {
-                    const count = Object.keys(data).length;
-                    updateStatus(`✅ API works! ${count} devices found.`, 'success');
-                })
-                .catch(error => {
-                    updateStatus('❌ API test failed', 'error');
-                });
-        }
-
-        function viewJSON() {
-            window.open(API_URL, '_blank');
-        }
-
-        function clearCommands() {
-            if (confirm('Clear all commands?')) {
-                fetch(API_URL, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                })
-                .then(() => updateStatus('✅ All commands cleared!', 'success'))
-                .catch(() => updateStatus('❌ Failed to clear', 'error'));
-            }
-        }
-
-        // Save/load device ID
-        document.getElementById('deviceId').addEventListener('input', function() {
-            localStorage.setItem('walleDeviceId', this.value.toUpperCase());
-        });
-
-        window.addEventListener('load', function() {
-            const saved = localStorage.getItem('walleDeviceId');
-            if (saved) {
-                document.getElementById('deviceId').value = saved;
-            }
-            setTimeout(testAPI, 500);
-        });
-
-        // Keyboard controls
-        document.addEventListener('keydown', function(event) {
-            if (event.target.tagName === 'INPUT') return;
-            
-            switch(event.key.toLowerCase()) {
-                case 'arrowup':
-                case 'w': sendCommand('F'); break;
-                case 'arrowdown':
-                case 's': sendCommand('B'); break;
-                case 'arrowleft':
-                case 'a': sendCommand('L'); break;
-                case 'arrowright':
-                case 'd': sendCommand('R'); break;
-                case ' ':
-                case 'x': sendCommand('S'); break;
-            }
-            event.preventDefault();
-        });
-    </script>
+    function sendCommand(cmd) {
+      const deviceId = document.getElementById("deviceId").value.trim().toUpperCase();
+      if (!deviceId || deviceId.length !== 8) {
+        updateStatus("❌ Invalid Device ID", "error");
+        return;
+      }
+      updateStatus(`Sending "${cmd}" to ${deviceId}...`, "sending");
+      db.ref(deviceId).set({
+        command: cmd,
+        timestamp: Math.floor(Date.now() / 1000)
+      }).then(() => {
+        updateStatus(`✅ Sent "${cmd}" to ${deviceId}`, "success");
+      }).catch(() => {
+        updateStatus("❌ Failed to send command", "error");
+      });
+    }
+  </script>
 </body>
 </html>
